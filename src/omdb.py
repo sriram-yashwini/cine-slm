@@ -5,20 +5,26 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Safely retrieve key from Streamlit Secrets or local .env
+OMDB_API_KEY = None
 try:
-    OMDB_API_KEY = st.secrets["OMDB_API_KEY"]
+    if "OMDB_API_KEY" in st.secrets:
+        OMDB_API_KEY = str(st.secrets["OMDB_API_KEY"]).strip()
 except Exception:
-    OMDB_API_KEY = os.getenv("OMDB_API_KEY")
+    pass
+
+if not OMDB_API_KEY:
+    OMDB_API_KEY = os.getenv("OMDB_API_KEY", "").strip()
 
 BASE_URL = "https://www.omdbapi.com/"
 
+
 def search_movie(movie_name):
     """
-    Search for movies by name.
-    Returns a list of matching movies.
+    Search for movies by name safely without crashing the Streamlit UI.
     """
     if not OMDB_API_KEY or OMDB_API_KEY == "your_actual_omdb_key":
-        st.error("Invalid or missing OMDb API Key. Please configure OMDB_API_KEY in Streamlit Secrets.")
+        st.error("Missing or invalid OMDb API Key. Please add OMDB_API_KEY in Streamlit App Settings -> Secrets.")
         return []
 
     params = {
@@ -28,24 +34,24 @@ def search_movie(movie_name):
     }
 
     try:
-        response = requests.get(BASE_URL, params=params, timeout=20)
+        response = requests.get(BASE_URL, params=params, timeout=15)
+        
+        # Check HTTP status code manually before calling raise_for_status
+        if response.status_code == 401:
+            st.error("OMDb Error 401: Unauthorized. Your API key is invalid or not yet activated via email.")
+            return []
+        
         response.raise_for_status()
         data = response.json()
 
         if data.get("Response") == "False":
-            st.info(data.get("Error", "No movies found matching your query."))
+            st.warning(data.get("Error", "No movies found."))
             return []
 
         return data.get("Search", [])
 
-    except requests.exceptions.HTTPError as http_err:
-        if response.status_code == 401:
-            st.error("OMDb API Error (401 Unauthorized): Verify your API key is correct and activated via the email link.")
-        else:
-            st.error(f"HTTP error occurred: {http_err}")
-        return []
-    except Exception as err:
-        st.error(f"An unexpected error occurred: {err}")
+    except requests.exceptions.RequestException as err:
+        st.error(f"Network / API Error: {err}")
         return []
 
 
@@ -54,7 +60,6 @@ def get_movie_details(imdb_id):
     Get complete movie details using IMDb ID.
     """
     if not OMDB_API_KEY or OMDB_API_KEY == "your_actual_omdb_key":
-        st.error("Invalid or missing OMDb API Key.")
         return None
 
     params = {
@@ -64,14 +69,14 @@ def get_movie_details(imdb_id):
     }
 
     try:
-        response = requests.get(BASE_URL, params=params, timeout=20)
-        response.raise_for_status()
-        data = response.json()
+        response = requests.get(BASE_URL, params=params, timeout=15)
+        if response.status_code != 200:
+            return None
 
+        data = response.json()
         if data.get("Response") == "False":
             return None
 
         return data
-    except Exception as err:
-        st.error(f"Failed to fetch movie details: {err}")
+    except Exception:
         return None
